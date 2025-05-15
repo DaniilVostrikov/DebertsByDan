@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Деберц Онлайн</title>
+  <style>
+    body { font-family: sans-serif; background: green; color: white; text-align: center; padding: 20px; }
+    #login, #game { margin-top: 50px; }
+    .card { display: inline-block; width: 40px; height: 60px; line-height: 60px; margin: 4px; background: white; color: black; border-radius: 5px; }
+    #hand, #table, #players { margin-top: 20px; }
+    input, button { padding: 8px; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <div id="login">
+    <h1>Деберц</h1>
+    <input id="name" placeholder="Введите имя">
+    <button onclick="joinGame()">Играть</button>
+  </div>
+
+  <div id="game" style="display:none">
+    <h2 id="welcome"></h2>
+    <div id="players"></div>
+    <div id="table"></div>
+    <div id="hand"></div>
+    <button onclick="playRandomCard()">Сыграть карту</button>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+    const socket = io("https://your-backend-url.com"); // замените на свой адрес
+
+    let playerName = "";
+    let playerHand = [];
+
+    function joinGame() {
+      playerName = document.getElementById("name").value;
+      if (!playerName) return alert("Введите имя");
+      socket.emit("join", { name: playerName });
+      document.getElementById("login").style.display = "none";
+      document.getElementById("game").style.display = "block";
+      document.getElementById("welcome").innerText = Привет, ${playerName};
+    }
+
+    socket.on("game_state", (state) => {
+      renderPlayers(state.players);
+      renderTable(state.table);
+      if (state.hands && state.hands[playerName]) {
+        playerHand = state.hands[playerName];
+        renderHand(playerHand);
+      }
+    });
+
+    function renderPlayers(players) {
+      const container = document.getElementById("players");
+      container.innerHTML = "<h3>Игроки:</h3>" + players.map(p => <div>${p.name}</div>).join("");
+    }
+
+    function renderTable(cards) {
+      const container = document.getElementById("table");
+      container.innerHTML = "<h3>На столе:</h3>" + cards.map(c => <div class='card'>${c}</div>).join("");
+    }
+
+    function renderHand(cards) {
+      const container = document.getElementById("hand");
+      container.innerHTML = "<h3>Твоя рука:</h3>" + cards.map((c, i) => <div class='card' onclick='playCard(${i})'>${c}</div>).join("");
+    }
+
+    function playCard(index) {
+      const card = playerHand[index];
+      socket.emit("play_card", { name: playerName, card });
+    }
+
+    function playRandomCard() {
+      if (playerHand.length > 0) playCard(0);
+    }
+  </script>
+</body>
+</html>
