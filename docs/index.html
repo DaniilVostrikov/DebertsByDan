@@ -73,9 +73,12 @@
     }
 
     function renderTable(cards) {
-      const container = document.getElementById("table");
-      container.innerHTML = "<h3>На столе:</h3>" + cards.map(c => `<div class='card'>${c}</div>`).join("");
-    }
+  const container = document.getElementById("table");
+  container.innerHTML = "<h3>На столе:</h3>" + cards.map(c => {
+    if (typeof c === "string") return `<div class='card'>${c}</div>`;
+    return `<div class='card'>${c.rank}${c.suit}</div>`;
+  }).join("");
+}
 
     function renderHand(cards) {
       const container = document.getElementById("hand");
