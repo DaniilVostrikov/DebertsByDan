@@ -1,4 +1,3 @@
-// Enhanced WebSocket server for Deberc with turn order, trump suit, and round handling
 const { Server } = require("socket.io");
 const http = require("http");
 const express = require("express");
@@ -20,18 +19,64 @@ let table = [];
 let trump = "";
 let turnIndex = 0;
 let deck = [];
+let takenCards = { }; // взятки игроков
+let scores = { }; // очки игроков
+
+const suits = ["♠️", "♥️", "♦️", "♣️"];
+const ranks = ["7", "8", "9", "10", "J", "Q", "K", "A"];
+
+// очки карт (примерный подсчет в Деберц)
+const cardPoints = {
+  "7": 0,
+  "8": 0,
+  "9": 0,
+  "10": 10,
+  "J": 2,
+  "Q": 3,
+  "K": 4,
+  "A": 11
+};
 
 const generateDeck = () => {
-  const suits = ["♠️", "♥️", "♦️", "♣️"];
-  const ranks = ["7", "8", "9", "10", "J", "Q", "K", "A"];
   const deck = [];
   for (const suit of suits) {
     for (const rank of ranks) {
-      deck.push(rank + suit);
+      deck.push({ rank, suit });
     }
   }
   return deck.sort(() => Math.random() - 0.5);
 };
+
+const cardValue = (card) => cardPoints[card.rank] || 0;
+
+const cardStr = (card) => card.rank + card.suit;
+
+function canBeat(cardToPlay, cardOnTable, trump) {
+  // Карта бьет другую если:
+  // 1. Та же масть и старший ранг
+  // 2. Козырь и карта на столе не козырь
+  if (cardToPlay.suit === cardOnTable.suit) {
+    return ranks.indexOf(cardToPlay.rank) > ranks.indexOf(cardOnTable.rank);
+  }
+  if (cardToPlay.suit === trump && cardOnTable.suit !== trump) {
+    return true;
+  }
+  return false;
+}
+
+function getWinnerCard(cardsOnTable, trump) {
+  // cardsOnTable = [{name, card:{rank, suit}} ...]
+  // возвращает имя игрока, который выиграл взятку
+  let winningCard = cardsOnTable[0].card;
+  let winner = cardsOnTable[0].name;
+  for (const c of cardsOnTable.slice(1)) {
+    if (canBeat(c.card, winningCard, trump)) {
+      winningCard = c.card;
+      winner = c.name;
+    }
+  }
+  return winner;
+}
 
 io.on("connection", (socket) => {
   console.log("Client connected", socket.id);
@@ -41,11 +86,16 @@ io.on("connection", (socket) => {
       players.push({ id: socket.id, name });
     }
 
-    if (players.length === 2) {
+    if (players.length === 2 && Object.keys(hands).length === 0) {
       deck = generateDeck();
-      trump = deck[deck.length - 1].slice(-1); // Last card suit as trump
+      trump = deck[deck.length - 1].suit;
+
       hands[players[0].name] = deck.splice(0, 10);
       hands[players[1].name] = deck.splice(0, 10);
+
+      takenCards = { [players[0].name]: [], [players[1].name]: [] };
+      scores = { [players[0].name]: 0, [players[1].name]: 0 };
+
       table = [];
       turnIndex = 0;
     }
@@ -54,21 +104,57 @@ io.on("connection", (socket) => {
   });
 
   socket.on("play_card", ({ name, card }) => {
-    if (players[turnIndex].name !== name) return;
-    if (!hands[name]?.includes(card)) return;
+    if (players[turnIndex]?.name !== name) {
+      socket.emit("error_message", "Не ваш ход");
+      return;
+    }
 
-    hands[name] = hands[name].filter(c => c !== card);
-    table.push({ name, card });
+    // Проверим есть ли такая карта в руке
+    const cardIndex = hands[name].findIndex(c => cardStr(c) === card);
+    if (cardIndex === -1) {
+      socket.emit("error_message", "У вас нет такой карты");
+      return;
+    }
 
-    // Advance turn
-    turnIndex = (turnIndex + 1) % players.length;
+    const cardToPlay = hands[name][cardIndex];
 
-    // Check if round is over (2 cards on table)
-    if (table.length === 2) {
-      setTimeout(() => {
-        table = [];
-        broadcastState();
-      }, 1000);
+    // Проверка правил:
+    // Если на столе нет карт - ходить можно любой
+    // Если на столе одна карта - нужно бить, если можно
+    if (table.length === 1) {
+      const firstCard = table[0].card;
+      const canBeatCard = canBeat(cardToPlay, firstCard, trump);
+
+      // Проверяем, есть ли у игрока карты, которыми он может побить
+      const hasToBeat = hands[name].some(c => canBeat(c, firstCard, trump));
+      if (hasToBeat && !canBeatCard) {
+        socket.emit("error_message", "Нужно побить карту на столе");
+        return;
+      }
+    }
+
+    // Снимаем карту с руки
+    hands[name].splice(cardIndex, 1);
+
+    // Кладем на стол
+    table.push({ name, card: cardToPlay });
+
+    if (table.length === players.length) {
+      // Определяем победителя взятки
+      const winner = getWinnerCard(table, trump);
+
+      // Добавляем карты на взятки победителя
+      takenCards[winner].push(...table.map(c => c.card));
+
+      // Пересчитываем очки
+      scores[winner] = takenCards[winner].reduce((acc, c) => acc + cardValue(c), 0);
+
+      // Очищаем стол и устанавливаем ход победителя
+      table = [];
+      turnIndex = players.findIndex(p => p.name === winner);
+    } else {
+      // Передаем ход следующему игроку
+      turnIndex = (turnIndex + 1) % players.length;
     }
 
     broadcastState();
@@ -81,6 +167,8 @@ io.on("connection", (socket) => {
     table = [];
     trump = "";
     turnIndex = 0;
+    takenCards = {};
+    scores = {};
     broadcastState();
   });
 });
@@ -89,15 +177,28 @@ function broadcastState() {
   const turn = players[turnIndex]?.name;
   io.emit("game_state", {
     players,
-    hands,
-    table,
+    hands: serializeHands(hands),
+    table: serializeTable(table),
     trump,
-    turn
+    turn,
+    scores,
   });
 }
 
+function serializeHands(hands) {
+  const result = {};
+  for (const p in hands) {
+    result[p] = hands[p].map(cardStr);
+  }
+  return result;
+}
+
+function serializeTable(table) {
+  return table.map(({ name, card }) => ({ name, card: cardStr(card) }));
+}
+
 app.get("/", (req, res) => {
-  res.send("\u0414\u0435\u0431\u0435\u0440\u0446 WebSocket \u0441\u0435\u0440\u0432\u0435\u0440 \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442");
+  res.send("Деберц WebSocket сервер работает");
 });
 
 server.listen(PORT, () => {

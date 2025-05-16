@@ -1,21 +1,23 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Деберц Онлайн</title>
   <style>
     body { font-family: sans-serif; background: green; color: white; text-align: center; padding: 20px; }
     #login, #game { margin-top: 50px; }
-    .card { display: inline-block; width: 40px; height: 60px; line-height: 60px; margin: 4px; background: white; color: black; border-radius: 5px; cursor: pointer; }
+    .card { display: inline-block; width: 40px; height: 60px; line-height: 60px; margin: 4px; background: white; color: black; border-radius: 5px; cursor: pointer; user-select: none; }
+    .card.disabled { pointer-events: none; opacity: 0.5; }
     #hand, #table, #players { margin-top: 20px; }
     input, button { padding: 8px; font-size: 16px; }
-    #status { margin-top: 20px; font-weight: bold; }
+    #status, #scores, #error { margin-top: 20px; font-weight: bold; }
+    #error { color: #ffaaaa; }
   </style>
 </head>
 <body>
   <div id="login">
     <h1>Деберц</h1>
-    <input id="name" placeholder="Введите имя">
+    <input id="name" placeholder="Введите имя" />
     <button onclick="joinGame()">Играть</button>
   </div>
 
@@ -24,8 +26,10 @@
     <div id="players"></div>
     <div id="trump"></div>
     <div id="status"></div>
+    <div id="scores"></div>
     <div id="table"></div>
     <div id="hand"></div>
+    <div id="error"></div>
   </div>
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
@@ -38,33 +42,45 @@
     let trumpSuit = "";
 
     function joinGame() {
-      playerName = document.getElementById("name").value;
+      playerName = document.getElementById("name").value.trim();
       if (!playerName) return alert("Введите имя");
       socket.emit("join", { name: playerName });
       document.getElementById("login").style.display = "none";
       document.getElementById("game").style.display = "block";
       document.getElementById("welcome").innerText = `Привет, ${playerName}`;
+      clearError();
     }
 
     socket.on("game_state", (state) => {
-      renderPlayers(state.players);
-      renderTable(state.table);
-      renderTrump(state.trump);
       currentTurn = state.turn;
       trumpSuit = state.trump;
 
-      document.getElementById("status").innerText =
-        currentTurn === playerName ? "Ваш ход" : `Ходит: ${currentTurn}`;
+      renderPlayers(state.players, currentTurn);
+      renderTrump(trumpSuit);
+      renderTable(state.table);
+      renderStatus(currentTurn);
+      renderScores(state.scores);
 
       if (state.hands && state.hands[playerName]) {
         playerHand = state.hands[playerName];
-        renderHand(playerHand);
+      } else {
+        playerHand = [];
       }
+      renderHand(playerHand);
+
+      clearError();
     });
 
-    function renderPlayers(players) {
+    socket.on("error_message", (msg) => {
+      showError(msg);
+    });
+
+    function renderPlayers(players, turn) {
       const container = document.getElementById("players");
-      container.innerHTML = "<h3>Игроки:</h3>" + players.map(p => `<div>${p.name}</div>`).join("");
+      container.innerHTML = "<h3>Игроки:</h3>" + players.map(p => {
+        const isActive = p.name === turn;
+        return `<div>${p.name}${isActive ? " (Ходит)" : ""}</div>`;
+      }).join("");
     }
 
     function renderTrump(trump) {
@@ -72,28 +88,60 @@
       container.innerHTML = trump ? `<h3>Козырь: ${trump}</h3>` : "";
     }
 
+    function renderStatus(turn) {
+      const container = document.getElementById("status");
+      if (turn === playerName) {
+        container.innerText = "Ваш ход";
+      } else if (turn) {
+        container.innerText = `Ходит: ${turn}`;
+      } else {
+        container.innerText = "";
+      }
+    }
+
+    function renderScores(scores) {
+      const container = document.getElementById("scores");
+      if (!scores) {
+        container.innerHTML = "";
+        return;
+      }
+      container.innerHTML = "<h3>Очки:</h3>" + Object.entries(scores).map(([player, score]) => {
+        return `<div>${player}: ${score}</div>`;
+      }).join("");
+    }
+
     function renderTable(cards) {
-  const container = document.getElementById("table");
-  container.innerHTML = "<h3>На столе:</h3>" + cards.map(c => {
-    if (!c) return "";
-    if (typeof c === "string") return `<div class='card'>${c}</div>`;
-    if (typeof c === "object" && c.rank && c.suit) return `<div class='card'>${c.rank}${c.suit}</div>`;
-    return `<div class='card'>?</div>`;
-  }).join("");
-}
+      const container = document.getElementById("table");
+      container.innerHTML = "<h3>На столе:</h3>" + cards.map(c => {
+        if (!c) return "";
+        return `<div class='card'>${c.card} (${c.name})</div>`;
+      }).join("");
+    }
 
     function renderHand(cards) {
       const container = document.getElementById("hand");
       container.innerHTML = "<h3>Твоя рука:</h3>" + cards.map((c, i) => {
-        const disabled = currentTurn !== playerName ? "pointer-events: none; opacity: 0.5;" : "";
-        return `<div class='card' onclick='playCard(${i})' style='${disabled}'>${c}</div>`;
+        const disabled = currentTurn !== playerName ? "disabled" : "";
+        return `<div class="card ${disabled}" onclick="playCard(${i})">${c}</div>`;
       }).join("");
     }
 
-    function playCard(index) {
+    function playCard(cardIndex) {
       if (currentTurn !== playerName) return;
-      const card = playerHand[index];
+
+      const card = playerHand[cardIndex];
+      if (!card) return;
+
       socket.emit("play_card", { name: playerName, card });
+    }
+
+    function showError(msg) {
+      const container = document.getElementById("error");
+      container.innerText = msg;
+    }
+
+    function clearError() {
+      document.getElementById("error").innerText = "";
     }
   </script>
 </body>
