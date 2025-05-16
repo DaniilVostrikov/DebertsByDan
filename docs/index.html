@@ -39,7 +39,7 @@
       socket.emit("join", { name: playerName });
       document.getElementById("login").style.display = "none";
       document.getElementById("game").style.display = "block";
-      document.getElementById("welcome").innerText = Привет, ${playerName};
+      document.getElementById("welcome").innerText = `Привет, ${playerName}`;
     }
 
     socket.on("game_state", (state) => {
@@ -53,17 +53,17 @@
 
     function renderPlayers(players) {
       const container = document.getElementById("players");
-      container.innerHTML = "<h3>Игроки:</h3>" + players.map(p => <div>${p.name}</div>).join("");
+      container.innerHTML = "<h3>Игроки:</h3>" + players.map(p => `<div>${p.name}</div>`).join("");
     }
 
     function renderTable(cards) {
       const container = document.getElementById("table");
-      container.innerHTML = "<h3>На столе:</h3>" + cards.map(c => <div class='card'>${c}</div>).join("");
+      container.innerHTML = "<h3>На столе:</h3>" + cards.map(c => `<div class='card'>${c}</div>`).join("");
     }
 
     function renderHand(cards) {
       const container = document.getElementById("hand");
-      container.innerHTML = "<h3>Твоя рука:</h3>" + cards.map((c, i) => <div class='card' onclick='playCard(${i})'>${c}</div>).join("");
+      container.innerHTML = "<h3>Твоя рука:</h3>" + cards.map((c, i) => `<div class='card' onclick='playCard(${i})'>${c}</div>`).join("");
     }
 
     function playCard(index) {

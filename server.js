@@ -74,6 +74,10 @@ function broadcastState() {
   });
 }
 
+app.get("/", (req, res) => {
+    res.send("Деберц WebSocket сервер работает");
+  });
+
 server.listen(PORT, () => {
   console.log(`Deberc server running on port ${PORT}`);
 });
